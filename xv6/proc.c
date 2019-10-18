@@ -534,6 +534,7 @@ int
 setpri(int pid, int pri)
 {
     struct proc *p;
+    if (pri < 0 || pri > 3) return -1;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
         if (p->pid == pid) {
             p->priority = pri;
@@ -560,6 +561,7 @@ getpri(int pid)
 int
 fork2(int pri)
 {
+    if (pri < 0 || pri > 3) return -1;
     int i, pid;
     struct proc *np;
     struct proc *curproc = myproc();
@@ -579,7 +581,7 @@ fork2(int pri)
     np->sz = curproc->sz;
 
     np->priority = pri; // Different part from fork() : add priority here
-    
+
     np->parent = curproc;
     *np->tf = *curproc->tf;
 
@@ -608,5 +610,23 @@ fork2(int pri)
 int
 getpinfo(struct pstat* ps)
 {
-    return -1;
+    if (!ps) return -1;
+    acquire(&ptable.lock);
+    for(int i = 0; i< NPROC; i++){
+        if(ptable.proc[i].state != UNUSED){
+            ps->inuse[i] = 1;
+        } else{
+            ps->inuse[i] = 0;
+            continue;
+        }
+        ps -> pid[i] = ptable.proc[i].pid;
+        ps -> priority[i] = ptable.proc[i].priority;
+        ps -> state[i] = ptable.proc[i].state;
+        for(int j = 0 ; j < NLAYER; j++) {
+            ps->ticks[i][j] = ptable.proc[i].ticks[j];
+            ps->qtail[i][j] = ptable.proc[i].qtail[j];
+        }
+    }
+    release(&ptable.lock);
+    return 0;
 }
