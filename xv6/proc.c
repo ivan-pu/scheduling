@@ -608,5 +608,24 @@ fork2(int pri)
 int
 getpinfo(struct pstat* ps)
 {
-    return -1;
+    acquire(&ptable.lock);
+    for(int i = 0; i< NPROC; i++){
+
+        if(ptable.proc[i].state != UNUSED){
+            ps->inuse[i] = 1;
+        }else{
+            ps->inuse[i] = 0;
+
+        }
+
+        ps -> pid = ptable.proc[i].pid;
+        ps -> priority[i] = ptable.proc[i].priority;
+        ps -> state[i] = ptable.proc[i].state;
+        for(int j = 0 ; j<NLAYER; j++) {
+            ps->ticks[i][j] = ptable.proc[i].ticks[j];
+            ps->qtail[i][j] = ptable.proc[i].qtail[j];
+        }
+    }
+    release(&ptable.lock);
+    return 0;
 }
