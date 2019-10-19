@@ -533,6 +533,7 @@ procdump(void)
 int
 setpri(int pid, int pri)
 {
+    if (pri < 0 || pri > 3 || pid < 0) return -1;
     struct proc *p;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
         if (p->pid == pid) {
@@ -547,6 +548,7 @@ setpri(int pid, int pri)
 int
 getpri(int pid)
 {
+    if (pid < 0) return -1;
     struct proc *p;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
         if (p->pid == pid) {
@@ -560,6 +562,7 @@ getpri(int pid)
 int
 fork2(int pri)
 {
+    if (pri < 0 || pri > 3) return -1;
     int i, pid;
     struct proc *np;
     struct proc *curproc = myproc();
@@ -608,6 +611,7 @@ fork2(int pri)
 int
 getpinfo(struct pstat* ps)
 {
+    if (!ps) return -1;
     acquire(&ptable.lock);
     for(int i = 0; i< NPROC; i++){
 
@@ -618,7 +622,7 @@ getpinfo(struct pstat* ps)
 
         }
 
-        ps -> pid = ptable.proc[i].pid;
+        ps -> pid[i] = ptable.proc[i].pid;
         ps -> priority[i] = ptable.proc[i].priority;
         ps -> state[i] = ptable.proc[i].state;
         for(int j = 0 ; j<NLAYER; j++) {
