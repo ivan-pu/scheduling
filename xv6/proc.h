@@ -56,7 +56,7 @@ struct proc {
   int priority;                // current priority level of the process (0-3)
   int ticks[4];                // total num ticks each process has accumulated at each priority
   int qtail[4];                // total num times moved to tail of queue (e.g., setprio, end of timeslice, waking)
-
+  int tickremain;               // time ticks remaining for this proc on this priority
 };
 
 // Process memory is laid out contiguously, low addresses first:

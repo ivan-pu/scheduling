@@ -8,7 +8,10 @@
 
 int
 main(int argc, char *argv[]) {
-    if (argc != 5) return -1;
+    if (argc != 5) {
+        printf(1, "Wrong Usage\n");
+        exit();
+    }
     int error = 0;
     char *args[1];
     args[0] = "loop";
@@ -22,8 +25,9 @@ main(int argc, char *argv[]) {
         if (pid == 0) {
             error = exec(job, args);
             if (error == -1) {
-                printf(1, "Loop exec error\n");
+                printf(1, "exec error\n");
             }
+            exit();
         } else {
             pids[i] = pid;
         }
@@ -46,11 +50,11 @@ main(int argc, char *argv[]) {
     }
     for (int j = 0; j < NPROC; j++) {
         if (st.inuse[j] && st.pid[j] >= 3 && st.pid[j] != getpid()) {
-            DEBUG_PRINT((1, "XV6_SCHEDULER\t CHILD\n"));
-            DEBUG_PRINT((1, "pid: %d\n", st.pid[j]));
+            DEBUG_PRINT((1, "CHILD\n"));
+            // DEBUG_PRINT((1, "pid: %d\n", st.pid[j]));
             for (int k = 3; k >= 0; k--) {
-                DEBUG_PRINT((1, "XV6_SCHEDULER\t \t level %d ticks used %d\n", k, st.ticks[j][k]));
-                DEBUG_PRINT((1, "XV6_SCHEDULER\t \t level %d qtail %d\n", k, st.qtail[j][k]));
+                DEBUG_PRINT((1, "level %d ticks used %d\n", k, st.ticks[j][k]));
+                DEBUG_PRINT((1, "level %d qtail %d\n", k, st.qtail[j][k]));
             }
         }
     }

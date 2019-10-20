@@ -15,11 +15,46 @@ struct {
 
 static struct proc *initproc;
 
+const int timeSlice[4] = {20,16,12,8};
+static int queue[4][NPROC]; // queue contains PIDs
+
 int nextpid = 1;
 extern void forkret(void);
 extern void trapret(void);
 
 static void wakeup1(void *chan);
+
+static int enqueue(int pid, int pri){
+    if (pid <= 0 || pri < 0 || pri > 3) return -1;
+    for (int i = 0; i < NPROC; i++) {
+        if (queue[pri][i] == 0) { // found end of queue
+            queue[pri][i] = pid;
+            for (struct proc *p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+                if (p->pid == pid) {
+                    p->qtail[pri] += 1;
+                    p->tickremain = timeSlice[pri];
+                    return 0;
+                }
+            }
+
+        }
+    }
+    // didn't find empty slot
+    return -1;
+}
+
+static int dequeue(int pid, int pri){
+    if (pid <= 0 || pri < 0 || pri > 3) return -1;
+    for (int i = 0; i < NPROC; i++) {
+        if (queue[pri][i] == pid) { // found the pid to dequeue
+            for (int j = i;queue[pri][j] != 0 && j < NPROC; j++){
+                queue[pri][j] = queue[pri][j + 1];
+            }
+            break;
+        }
+    }
+    return 0;
+}
 
 void
 pinit(void)
@@ -148,6 +183,9 @@ userinit(void)
   acquire(&ptable.lock);
 
   p->state = RUNNABLE;
+  p->priority = 3;
+  p->tickremain = timeSlice[3];
+  enqueue(p->pid,3);
 
   release(&ptable.lock);
 }
@@ -214,6 +252,9 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+  np->priority = curproc->priority;
+  np->tickremain = timeSlice[np->priority];
+  enqueue(np->pid,np->priority);
 
   release(&ptable.lock);
 
@@ -317,40 +358,90 @@ wait(void)
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
+//void
+//scheduler(void)
+//{
+//  struct proc *p;
+//  struct cpu *c = mycpu();
+//  c->proc = 0;
+//
+//  for(;;){
+//    // Enable interrupts on this processor.
+//    sti();
+//
+//    // Loop over process table looking for process to run.
+//    acquire(&ptable.lock);
+//    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+//      if(p->state != RUNNABLE)
+//        continue;
+//
+//      // Switch to chosen process.  It is the process's job
+//      // to release ptable.lock and then reacquire it
+//      // before jumping back to us.
+//      c->proc = p;
+//      switchuvm(p);
+//      p->state = RUNNING;
+//
+//      swtch(&(c->scheduler), p->context);
+//      switchkvm();
+//
+//      // Process is done running for now.
+//      // It should have changed its p->state before coming back.
+//      c->proc = 0;
+//    }
+//    release(&ptable.lock);
+//
+//  }
+//}
 void
 scheduler(void)
 {
-  struct proc *p;
-  struct cpu *c = mycpu();
-  c->proc = 0;
+    struct proc *p;
+    struct cpu *c = mycpu();
+    c->proc = 0;
 
-  for(;;){
-    // Enable interrupts on this processor.
-    sti();
+    for (;;) {
+        // Enable interrupts on this processor.
+        sti();
 
-    // Loop over process table looking for process to run.
-    acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+        // Loop over process table looking for process to run.
+        acquire(&ptable.lock);
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
+        for (int pri = 3; pri >= 0; pri--) {
+            if (queue[pri][0] == 0) // If no proc queued in current pri
+                continue;
+            else { // Find one thing to schedule
+                for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+                    if (p->pid == queue[pri][0]) break;
+                }
+                // Update process ticks
+                p->tickremain--;
+                p->ticks[pri] += 1;
 
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
+                // Switch to chosen process.  It is the process's job
+                // to release ptable.lock and then reacquire it
+                // before jumping back to us.
+                c->proc = p;
+                switchuvm(p);
+                p->state = RUNNING;
+                swtch(&(c->scheduler), p->context);
+                switchkvm();
 
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
+                // Process is done running for now.
+                // It should have changed its p->state before coming back.
+                if (p->state != RUNNABLE) dequeue(p->pid, p->priority); // If sleeping or zombie, dequeue
+                c->proc = 0;
+
+                if (p->tickremain <= 0) {
+                    // Used up all the time. Move to the back
+                    dequeue(p->pid, p->priority);
+                    enqueue(p->pid, p->priority);
+                }
+                break;
+            }
+        }
+        release(&ptable.lock);
     }
-    release(&ptable.lock);
-
-  }
 }
 
 // Enter scheduler.  Must hold only ptable.lock
@@ -457,8 +548,10 @@ wakeup1(void *chan)
   struct proc *p;
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == SLEEPING && p->chan == chan)
-      p->state = RUNNABLE;
+    if(p->state == SLEEPING && p->chan == chan) {
+        p->state = RUNNABLE;
+        enqueue(p->pid,p->priority);
+    }
 }
 
 // Wake up all processes sleeping on chan.
@@ -533,11 +626,14 @@ procdump(void)
 int
 setpri(int pid, int pri)
 {
-    if (pri < 0 || pri > 3 || pid < 0) return -1;
+    if (pri < 0 || pri > 3 || pid <= 0) return -1;
     struct proc *p;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
         if (p->pid == pid) {
+            dequeue(pid, p->priority);
             p->priority = pri;
+            enqueue(pid, pri);
+            p->tickremain = timeSlice[pri];
             return 0;
         }
     }
@@ -546,11 +642,10 @@ setpri(int pid, int pri)
 
 // returns the current priority of the specified PID
 int
-getpri(int pid)
-{
-    if (pid < 0) return -1;
+getpri(int pid) {
+    if (pid <= 0) return -1;
     struct proc *p;
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
         if (p->pid == pid) {
             return p->priority;
         }
@@ -560,20 +655,19 @@ getpri(int pid)
 
 // create process that begins at the specified priority
 int
-fork2(int pri)
-{
+fork2(int pri) {
     if (pri < 0 || pri > 3) return -1;
     int i, pid;
     struct proc *np;
     struct proc *curproc = myproc();
 
     // Allocate process.
-    if((np = allocproc()) == 0){
+    if ((np = allocproc()) == 0) {
         return -1;
     }
 
     // Copy process state from proc.
-    if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
+    if ((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0) {
         kfree(np->kstack);
         np->kstack = 0;
         np->state = UNUSED;
@@ -582,15 +676,15 @@ fork2(int pri)
     np->sz = curproc->sz;
 
     np->priority = pri; // Different part from fork() : add priority here
-    
+
     np->parent = curproc;
     *np->tf = *curproc->tf;
 
     // Clear %eax so that fork returns 0 in the child.
     np->tf->eax = 0;
 
-    for(i = 0; i < NOFILE; i++)
-        if(curproc->ofile[i])
+    for (i = 0; i < NOFILE; i++)
+        if (curproc->ofile[i])
             np->ofile[i] = filedup(curproc->ofile[i]);
     np->cwd = idup(curproc->cwd);
 
@@ -601,6 +695,9 @@ fork2(int pri)
     acquire(&ptable.lock);
 
     np->state = RUNNABLE;
+    np->priority = pri;
+    np->tickremain = timeSlice[pri];
+    enqueue(np->pid, pri);
 
     release(&ptable.lock);
 
@@ -609,25 +706,22 @@ fork2(int pri)
 
 // fill the pstat table using the information in ptable
 int
-getpinfo(struct pstat* ps)
-{
+getpinfo(struct pstat *ps) {
     if (!ps) return -1;
     acquire(&ptable.lock);
-    for(int i = 0; i< NPROC; i++){
+    for (int i = 0; i < NPROC; i++) {
 
-        if(ptable.proc[i].state != UNUSED){
-            ps->inuse[i] = 1;
-        }else{
+        if (ptable.proc[i].state == UNUSED || ptable.proc[i].state == ZOMBIE) {
             ps->inuse[i] = 0;
-
-        }
-
-        ps -> pid[i] = ptable.proc[i].pid;
-        ps -> priority[i] = ptable.proc[i].priority;
-        ps -> state[i] = ptable.proc[i].state;
-        for(int j = 0 ; j<NLAYER; j++) {
-            ps->ticks[i][j] = ptable.proc[i].ticks[j];
-            ps->qtail[i][j] = ptable.proc[i].qtail[j];
+        } else {
+            ps->inuse[i] = 1;
+            ps->pid[i] = ptable.proc[i].pid;
+            ps->priority[i] = ptable.proc[i].priority;
+            ps->state[i] = ptable.proc[i].state;
+            for (int j = 0; j < NLAYER; j++) {
+                ps->ticks[i][j] = ptable.proc[i].ticks[j];
+                ps->qtail[i][j] = ptable.proc[i].qtail[j];
+            }
         }
     }
     release(&ptable.lock);
