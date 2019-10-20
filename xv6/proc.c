@@ -429,10 +429,10 @@ scheduler(void)
 
                 // Process is done running for now.
                 // It should have changed its p->state before coming back.
-                if (p->state != RUNNABLE) dequeue(p->pid, p->priority); // If sleeping or zombie, dequeue
-                c->proc = 0;
 
-                if (p->tickremain <= 0) {
+                c->proc = 0;
+                if (p->state != RUNNABLE) dequeue(p->pid, p->priority); // If sleeping or zombie, dequeue
+                else if (p->tickremain <= 0) {
                     // Used up all the time. Move to the back
                     dequeue(p->pid, p->priority);
                     enqueue(p->pid, p->priority);
